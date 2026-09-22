@@ -631,7 +631,7 @@ log('session_start', demo ? 'demo' : 'robot');
 </body>
 </html>
 -->
-
+<!--
 <!doctype html>
 <html lang="en">
 <head>
@@ -641,7 +641,6 @@ log('session_start', demo ? 'demo' : 'robot');
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap" rel="stylesheet">
-<!-- Ohmni in-call API. Outside a call (or offline) the page falls back to demo mode. -->
 <script src="https://api.ohmnilabs.com/ohmni-api/Ohmni-incall.js" onerror="window.__ohmniLoadFailed = true"></script>
 <style>
   :root {
@@ -1323,6 +1322,862 @@ function drawDemo() {
 }
 if (demo) requestAnimationFrame(demoLoop);
 
+updateUI();
+log('session_start', demo ? 'demo' : 'robot');
+</script>
+</body>
+</html>
+-->
+
+
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Easy Drive for Ohmni</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap" rel="stylesheet">
+<!-- Ohmni in-call API. Outside a call (or offline) the page falls back to demo mode. -->
+<script src="https://api.ohmnilabs.com/ohmni-api/Ohmni-incall.js" onerror="window.__ohmniLoadFailed = true"></script>
+<style>
+  :root {
+    --ink: #13334A;
+    --ink-soft: #2C4D63;
+    --mist: #E9EFEE;
+    --panel: #FFFFFF;
+    --line: #C9D4D6;
+    --muted: #55666F;
+    --signal: #F2C230;
+    --stop: #C63A2F;
+    --stop-dark: #9E2B22;
+    --feed: #1B2B36;
+    --ok: #2E8A57;
+    --radius-lg: 18px;
+    --radius-sm: 10px;
+    font-family: "Atkinson Hyperlegible", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: var(--ink);
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    /* Opaque, full-screen layer so it sits on top of Ohmni's default call UI */
+    position: fixed; inset: 0; z-index: 2147483000;
+    background: var(--mist);
+    display: grid; grid-template-rows: auto 1fr;
+    font-size: 17px; line-height: 1.4;
+    overflow: auto;
+  }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  button:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
+
+  /* Header */
+  header {
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    padding: 12px 20px; background: var(--panel); border-bottom: 1px solid var(--line);
+  }
+  .brand { font-size: 22px; font-weight: 700; margin: 0; }
+  .status { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); }
+  .status .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); }
+  .status.live .dot { background: var(--ok); }
+  .header-actions { margin-left: auto; display: flex; gap: 8px; }
+  .quiet-btn {
+    background: transparent; border: 2px solid var(--line); border-radius: var(--radius-sm);
+    padding: 8px 14px; font-weight: 700;
+  }
+  .quiet-btn:hover { border-color: var(--ink); }
+
+  /* Layout */
+  main {
+    display: grid; gap: 16px; padding: 16px 20px 20px;
+    grid-template-columns: minmax(0, 1fr) 320px;
+    grid-template-rows: minmax(260px, 1fr) auto;
+    grid-template-areas: "cam side" "controls side";
+    min-height: 0;
+  }
+  main.no-help { grid-template-columns: minmax(0, 1fr) 260px; }
+  .cam { grid-area: cam; display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+  .side { grid-area: side; display: flex; flex-direction: column; gap: 16px; min-height: 0; }
+  .controls { grid-area: controls; }
+
+  /* Robot camera */
+  .feeds { flex: 1; display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 12px; min-height: 0; }
+  .frame {
+    position: relative; min-height: 240px;
+    background: var(--feed); border-radius: var(--radius-lg); overflow: hidden;
+  }
+  .frame canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .chip {
+    position: absolute; top: 12px; left: 12px;
+    background: rgba(255,255,255,.92); border-radius: 8px; padding: 4px 10px; font-weight: 700; font-size: 15px;
+  }
+  .moving {
+    position: absolute; top: 12px; right: 12px; display: none;
+    background: var(--signal); border-radius: 8px; padding: 4px 12px; font-weight: 700; font-size: 15px;
+  }
+  .frame.is-moving .moving { display: block; }
+  .notice {
+    position: absolute; inset: auto 12px 12px 12px; display: none;
+    background: rgba(255,255,255,.95); border-radius: var(--radius-sm); padding: 10px 14px; font-size: 15px;
+  }
+  .notice.show { display: block; }
+  .mark-btn { display: block; margin-top: 8px; }
+  .frame.marking { outline: 4px solid var(--signal); outline-offset: -4px; }
+  .frame.marking canvas { cursor: crosshair; touch-action: none; }
+  .hint { margin: 0; font-size: 19px; font-weight: 700; min-height: 1.4em; }
+  .hint small { font-weight: 400; color: var(--muted); font-size: 16px; }
+
+  /* Side column */
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 14px; }
+  .panel h2 { font-size: 17px; margin: 0 0 10px; }
+  .self-frame {
+    position: relative; aspect-ratio: 4 / 3; background: var(--feed); border-radius: var(--radius-sm);
+    overflow: hidden; display: grid; place-items: center;
+  }
+  .self-frame video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); display: none; }
+  .self-frame.on video { display: block; }
+  .self-frame.on .self-btn { display: none; }
+  .self-btn { background: var(--panel); border: 0; border-radius: var(--radius-sm); padding: 10px 14px; font-weight: 700; }
+  .self-off { margin-top: 8px; }
+  .self-frame:not(.on) + .self-off { display: none; }
+
+  .steps { margin: 0; padding: 0; list-style: none; counter-reset: step; display: grid; gap: 12px; }
+  .steps li { counter-increment: step; display: grid; grid-template-columns: 30px 1fr; gap: 10px; }
+  .steps li::before {
+    content: counter(step); width: 30px; height: 30px; border-radius: 50%;
+    background: var(--ink); color: #fff; display: grid; place-items: center; font-weight: 700;
+  }
+  .steps b { display: block; }
+  .steps span { color: var(--muted); font-size: 15px; }
+  main.no-help #help { display: none; }
+
+  /* Controls */
+  .controls {
+    background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-lg);
+    padding: 16px; display: flex; flex-wrap: nowrap; gap: 20px 28px; align-items: center;
+  }
+  .pad { display: grid; grid-template-columns: repeat(3, 78px); grid-template-rows: repeat(3, 78px); gap: 8px; flex: none; }
+  .drive {
+    border: 2px solid var(--ink); border-radius: 14px; background: var(--panel);
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+    font-weight: 700; font-size: 13px; white-space: nowrap; padding: 0 2px; touch-action: none; user-select: none; -webkit-user-select: none;
+  }
+  .drive svg { width: 34px; height: 34px; }
+  .drive:hover { background: #F6F8F8; }
+  .drive.pressed { background: var(--signal); border-color: var(--ink); }
+  .pad .fwd { grid-column: 2; grid-row: 1; }
+  .pad .left { grid-column: 1; grid-row: 2; }
+  .pad .right { grid-column: 3; grid-row: 2; }
+  .pad .back { grid-column: 2; grid-row: 3; }
+  .pad .robot { grid-column: 2; grid-row: 2; display: grid; place-items: center; }
+  .pad .robot svg { width: 56px; height: 56px; transition: transform .15s; }
+
+  .groups { display: grid; gap: 12px; flex: 1; min-width: 0; }
+  .group h3 { font-size: 15px; margin: 0 0 6px; color: var(--muted); font-weight: 700; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; }
+  .opt {
+    border: 2px solid var(--line); background: var(--panel); border-radius: var(--radius-sm);
+    padding: 9px 14px; font-weight: 700; min-height: 46px;
+  }
+  .opt:hover { border-color: var(--ink); }
+  .opt[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: #fff; }
+  .vol-value { align-self: center; color: var(--muted); min-width: 7ch; }
+
+  .stop {
+    margin-left: auto; flex: none; width: 140px; height: 140px; border-radius: 28px; border: 0;
+    background: var(--stop); color: #fff; font-size: 30px; font-weight: 700;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+    box-shadow: 0 6px 0 var(--stop-dark);
+  }
+  .stop small { font-size: 14px; font-weight: 400; opacity: .9; }
+  .stop:active { transform: translateY(4px); box-shadow: 0 2px 0 var(--stop-dark); }
+
+  .toast {
+    position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%);
+    background: var(--ink); color: #fff; padding: 10px 16px; border-radius: var(--radius-sm);
+    display: none; max-width: 90vw;
+  }
+  .toast.show { display: block; }
+
+  .debug {
+    position: fixed; right: 12px; top: 80px; width: min(340px, 92vw); max-height: 45vh; overflow: auto;
+    background: #fff; border: 2px solid var(--ink); border-radius: var(--radius-sm); padding: 10px; font-size: 13px; z-index: 5;
+  }
+  .debug pre { margin: 6px 0 0; white-space: pre-wrap; font-size: 12px; }
+  .debug .ht { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 8px 0; }
+  .debug .ht button { border: 2px solid var(--ink); background: #fff; border-radius: 8px; padding: 4px 8px; font-size: 13px; font-weight: 700; }
+  .debug input[type=range] { flex: 1; min-width: 140px; }
+  @media (max-width: 900px) {
+    main, main.no-help { grid-template-columns: 1fr; grid-template-rows: auto; grid-template-areas: "cam" "controls" "side"; }
+    main { align-content: start; min-height: auto; }
+    .cam, .side { min-height: auto; }
+    .feeds { grid-template-columns: 1fr; }
+    .frame { min-height: 0; height: 62vw; }
+    .frame.lower { height: 50vw; }
+    .groups { flex-basis: 100%; }
+    .pad { margin: 0 auto; }
+    .controls { flex-wrap: wrap; }
+    .stop { margin-left: 0; width: 100%; height: 90px; flex-direction: row; gap: 12px; }
+  }
+  @media (prefers-reduced-motion: reduce) { .pad .robot svg { transition: none; } }
+</style>
+</head>
+<body>
+<header>
+  <h1 class="brand">Easy Drive</h1>
+  <span class="status" id="status"><span class="dot"></span><span id="statusText">Starting…</span></span>
+  <div class="header-actions">
+    <button class="quiet-btn" id="guideBtn" data-external="true" aria-pressed="true">Path guide on</button>
+    <button class="quiet-btn" id="helpBtn" data-external="true" aria-expanded="true">Hide help</button>
+    <button class="quiet-btn" id="logBtn" data-external="true">Download log (<span id="logCount">0</span>)</button>
+  </div>
+</header>
+
+<main id="main">
+  <section class="cam" aria-label="Robot cameras">
+    <div class="feeds" id="feeds">
+      <div class="frame" id="frame">
+        <canvas id="mainCanvas"></canvas>
+        <span class="chip">Front camera</span>
+        <span class="moving" id="movingBadge">Moving</span>
+        <div class="notice" id="notice" role="status"></div>
+      </div>
+      <div class="frame lower" id="lowerFrame">
+        <canvas id="lowerCanvas"></canvas>
+        <span class="chip">Floor camera</span>
+        <div class="notice" id="lowerNotice" role="status">
+          <span id="lowerNoticeText">Show the floor camera here: press the button, then drag a box around the small floor picture in the front camera.</span>
+          <button class="opt mark-btn" id="markBtn" data-external="true">Mark floor camera</button>
+        </div>
+      </div>
+    </div>
+    <p class="hint" id="hint" aria-live="polite"></p>
+  </section>
+
+  <aside class="side">
+    <section class="panel" aria-label="Your camera">
+      <h2>You</h2>
+      <div class="self-frame" id="selfFrame">
+        <video id="selfVideo" autoplay playsinline muted></video>
+        <button class="self-btn" id="selfBtn" data-external="true">Turn on my camera</button>
+      </div>
+      <button class="quiet-btn self-off" id="selfOffBtn" data-external="true">Turn off my camera</button>
+    </section>
+
+    <section class="panel" id="help" aria-label="How to drive">
+      <h2>How to drive</h2>
+      <ol class="steps">
+        <li><div><b>Look before you move</b><span>Use “Look at floor” to check the path in front of the robot.</span></div></li>
+        <li><div><b>Turn first, then go forward</b><span>Point the robot where you want to go, then drive straight.</span></div></li>
+        <li><div><b>Hold to drive</b><span>Press and hold an arrow, or an arrow key. The robot moves only while you hold it.</span></div></li>
+        <li><div><b>Stop anytime</b><span>Let go, press Stop, or press Space or Esc.</span></div></li>
+      </ol>
+    </section>
+  </aside>
+
+  <section class="controls" aria-label="Robot controls">
+    <div class="pad" role="group" aria-label="Drive">
+      <button class="drive fwd" data-drive="forward" data-external="true" aria-label="Drive forward">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4l7 8h-4.5v8h-5v-8H5z" fill="currentColor"/></svg>Forward</button>
+      <button class="drive left" data-drive="left" data-external="true" aria-label="Turn left">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12l8-7v4.5h8v5h-8V19z" fill="currentColor"/></svg>Turn left</button>
+      <div class="robot" aria-hidden="true">
+        <svg viewBox="0 0 56 56" id="robotGlyph"><circle cx="28" cy="28" r="22" fill="none" stroke="#13334A" stroke-width="3"/><path d="M28 8l6 9H22z" fill="#13334A"/></svg>
+      </div>
+      <button class="drive right" data-drive="right" data-external="true" aria-label="Turn right">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12l-8 7v-4.5H4v-5h8V5z" fill="currentColor"/></svg>Turn right</button>
+      <button class="drive back" data-drive="back" data-external="true" aria-label="Drive backward">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20l-7-8h4.5V4h5v8H19z" fill="currentColor"/></svg>Back</button>
+    </div>
+
+    <div class="groups">
+      <div class="group">
+        <h3>Speed</h3>
+        <div class="row">
+          <button class="opt" data-speed="slow" data-external="true" aria-pressed="true">Slow</button>
+          <button class="opt" data-speed="normal" data-external="true" aria-pressed="false">Normal</button>
+        </div>
+      </div>
+      <div class="group">
+        <h3>Look</h3>
+        <div class="row">
+          <button class="opt" data-look="up" data-external="true" aria-pressed="false">Look up</button>
+          <button class="opt" data-look="ahead" data-external="true" aria-pressed="true">Look ahead</button>
+          <button class="opt" data-look="down" data-external="true" aria-pressed="false">Look down</button>
+          <button class="opt" data-look="floor" data-external="true" aria-pressed="false">Look at floor</button>
+          <button class="opt" id="tiltUp" data-external="true" aria-label="Tilt up a little">Up a little</button>
+          <button class="opt" id="tiltDown" data-external="true" aria-label="Tilt down a little">Down a little</button>
+          <button class="opt" id="restHead" data-external="true">Rest head</button>
+        </div>
+      </div>
+      <div class="group">
+        <h3>Robot volume</h3>
+        <div class="row">
+          <button class="opt" id="volDown" data-external="true">Quieter</button>
+          <button class="opt" id="volUp" data-external="true">Louder</button>
+          <span class="vol-value" id="volValue"></span>
+        </div>
+      </div>
+    </div>
+
+    <button class="stop" id="stopBtn" data-external="true">Stop<small>Space or Esc</small></button>
+  </section>
+</main>
+
+<div class="toast" id="toast" role="alert"></div>
+<div class="debug" id="debug" hidden>
+  <b>Debug</b>
+  <div class="ht">
+    <label for="htPos">Head position</label>
+    <input type="range" id="htPos" min="300" max="650" step="10" value="450" data-external="true">
+    <output id="htVal">450</output>
+  </div>
+  <div class="ht">
+    <button id="htA" data-external="true">A: Basic tilt</button>
+    <button id="htB" data-external="true">B: pos command</button>
+    <button id="htC" data-external="true">C: Wake head</button>
+    <button id="htD" data-external="true">D: Rest head</button>
+  </div>
+  <div class="ht">
+    <button id="htHide" data-external="true">Hide robot video</button>
+    <button id="clearLower" data-external="true">Clear floor camera area</button>
+  </div>
+  <pre id="debugText"></pre>
+</div>
+
+<script>
+/* ============================================================
+   SETTINGS — adjust these after testing on your robot
+   ============================================================ */
+const CONFIG = {
+  speeds: {
+    slow:   { drive: 300, turn: 160 },
+    normal: { drive: 600, turn: 300 }
+  },
+  forwardSign: 1,      // set to -1 if "Forward" drives the robot backwards
+  turnSign: 1,         // set to -1 if "Turn left" and "Turn right" are swapped
+  repeatMs: 250,       // how often a held button re-sends its move command
+  moveMs: 600,         // duration of each command; robot stops by itself if the connection drops
+  frameMs: 66,         // video refresh interval (~15 frames per second)
+  captureWidth: 1280,   // higher = sharper floor camera, but more work for the browser
+  captureHeight: 720,
+  lowerArea: null,      // floor camera area as fractions, e.g. { x: 0.75, y: 0.7, w: 0.23, h: 0.28 }. Easier: use "Mark floor camera".
+  hideLowerInFront: true, // cover the small floor picture inside the front camera view
+  neck: { up: 600, ahead: 512, down: 420, floor: 340 },  // 300 = down 90°, 512 = straight, 650 = up ~45°
+  neckInterval: 150,   // larger = slower neck movement (WebAPI, typical 80-220)
+  neckMoveMs: 800,     // head move time in ms for the backup method
+  neckStep: 30,        // how far 'Tilt up/down a little' moves
+  neckMin: 300, neckMax: 650,
+  neckServoId: 3,      // Ohmni's neck servo id
+  neckDelayMs: 200,    // wait after switching the neck on before moving it
+  neckMethod: 'basic', // 'basic' = setNeckPosition, 'pos' = NativeJS pos command, 'both'
+  wakeDelayMs: 1500,   // after waking a resting head, wait this long before moving it
+  noVideoWarnMs: 5000
+};
+
+/* ---------- Mode ---------- */
+const params = new URLSearchParams(location.search);
+const hasOhmni = !!(window.Ohmni && typeof window.Ohmni.move === 'function');
+const demo = params.has('demo') || !hasOhmni;
+
+const $ = (id) => document.getElementById(id);
+const debugOn = params.has('debug');
+function dbg(msg) {
+  console.log('[EasyDrive]', msg);
+  if (!debugOn) return;
+  const t = $('debugText');
+  t.textContent = new Date().toLocaleTimeString() + '  ' + msg + '\n' + t.textContent;
+}
+if (debugOn) {
+  $('debug').hidden = false;
+  const O = window.Ohmni || {};
+  ['move', 'setNeckTorqueEnabled', 'setNeckPosition', 'sendBotshellCmd', 'captureVideo', 'setBotVolume', 'requestBotInfo']
+    .forEach(f => dbg('Ohmni.' + f + ': ' + (typeof O[f] === 'function' ? 'available' : 'MISSING')));
+  dbg('Ohmni script loaded: ' + (window.Ohmni ? 'yes' : 'no'));
+}
+const statusEl = $('status');
+$('statusText').textContent = demo ? 'Demo mode (no robot connected)' : 'Robot controls active';
+if (!demo) statusEl.classList.add('live');
+
+/* ---------- Logging (for user studies) ---------- */
+const t0 = Date.now();
+const events = [];
+function log(action, detail = '') {
+  events.push([new Date().toISOString(), ((Date.now() - t0) / 1000).toFixed(2), demo ? 'demo' : 'robot', action, detail]);
+  $('logCount').textContent = events.length;
+}
+$('logBtn').addEventListener('click', () => {
+  const header = 'timestamp,seconds,mode,action,detail\n';
+  const rows = events.map(r => r.map(c => '"' + String(c).replace(/"/g, '""') + '"').join(',')).join('\n');
+  const blob = new Blob([header + rows], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'easy-drive-log-' + new Date().toISOString().replace(/[:.]/g, '-') + '.csv';
+  document.body.appendChild(a); a.click(); a.remove();
+});
+
+/* ---------- Toast ---------- */
+let toastTimer;
+function toast(msg) {
+  const el = $('toast');
+  el.textContent = msg; el.classList.add('show');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('show'), 4000);
+}
+function safe(fn, what) {
+  if (demo) return;
+  try { fn(); } catch (e) { toast('Could not ' + what + '. Check that you are in a call with the robot.'); console.error(e); }
+}
+
+/* ---------- Robot commands ---------- */
+let headResting = false;
+function botshell(name, args) {
+  if (demo || !window.Ohmni || typeof Ohmni.sendBotshellCmd !== 'function') { dbg('sendBotshellCmd not available'); return false; }
+  try { Ohmni.sendBotshellCmd({ commandName: name, parameterArray: args }); dbg('sent ' + name + ' ' + args.join(' ')); return true; }
+  catch (e) { dbg(name + ' failed: ' + e.message); return false; }
+}
+const robot = {
+  move(l, r, ms) { safe(() => Ohmni.move(l, r, ms), 'move the robot'); },
+  look(pos) {
+    if (demo) return;
+    const O = window.Ohmni, m = CONFIG.neckMethod;
+    const doMove = () => {
+      if (m === 'basic' || m === 'both') {
+        try { O.setNeckTorqueEnabled(1); dbg('setNeckTorqueEnabled(1)'); } catch (e) { dbg('torque failed: ' + e.message); }
+        setTimeout(() => {
+          try { O.setNeckPosition(pos, CONFIG.neckInterval); dbg('setNeckPosition(' + pos + ', ' + CONFIG.neckInterval + ')'); }
+          catch (e) { dbg('setNeckPosition failed: ' + e.message); toast('Could not move the head.'); }
+        }, CONFIG.neckDelayMs);
+      }
+      if (m === 'pos' || m === 'both') botshell('pos', [CONFIG.neckServoId, pos, CONFIG.neckMoveMs]);
+    };
+    // Only wake the head if it was put to rest; waking every time overrides the new position
+    if (headResting && typeof O.sendBotshellCmd === 'function') {
+      botshell('wake_head', []); headResting = false;
+      setTimeout(doMove, CONFIG.wakeDelayMs);
+    } else doMove();
+  },
+  restHead() {
+    if (demo) return;
+    if (botshell('rest_head', [])) headResting = true;
+    else toast('This robot does not support resting the head from here.');
+  },
+  setVolume(v) { safe(() => Ohmni.setBotVolume(v), 'change the volume'); }
+};
+
+function wheelsFor(dir, s) {
+  const f = CONFIG.forwardSign, t = CONFIG.turnSign;
+  switch (dir) {
+    case 'forward': return [ s.drive * f, -s.drive * f];
+    case 'back':    return [-s.drive * f,  s.drive * f];
+    case 'left':    return [-s.turn * t,  -s.turn * t];
+    case 'right':   return [ s.turn * t,   s.turn * t];
+  }
+  return [0, 0];
+}
+
+/* ---------- Driving ---------- */
+const sim = { z: 0, heading: 0, tilt: 512, tiltTarget: 512, cmd: null };
+let active = null, repeatTimer = null, speedKey = 'slow';
+const dirWords = { forward: 'Moving forward', back: 'Moving back', left: 'Turning left', right: 'Turning right' };
+
+function sendOnce() {
+  if (!active) return;
+  const [l, r] = wheelsFor(active, CONFIG.speeds[speedKey]);
+  robot.move(l, r, CONFIG.moveMs);
+  sim.cmd = { dir: active, speed: speedKey, until: performance.now() + CONFIG.moveMs };
+}
+function startDrive(dir, source) {
+  if (active === dir) return;
+  if (active) stopDrive('switch');
+  active = dir;
+  sendOnce();
+  repeatTimer = setInterval(sendOnce, CONFIG.repeatMs);
+  setPressed(dir, true);
+  log('drive_start', dir + ' | ' + speedKey + ' | ' + source);
+  updateUI();
+}
+function stopDrive(reason = 'release') {
+  if (!active) return;
+  clearInterval(repeatTimer); repeatTimer = null;
+  setPressed(active, false);
+  const d = active; active = null;
+  robot.move(0, 0, 100);
+  sim.cmd = null;
+  log('drive_stop', d + ' | ' + reason);
+  updateUI();
+}
+function fullStop(source) {
+  if (active) stopDrive('stop_' + source);
+  else { robot.move(0, 0, 100); sim.cmd = null; }
+  log('stop_pressed', source);
+  updateUI();
+}
+function setPressed(dir, on) {
+  document.querySelectorAll('[data-drive="' + dir + '"]').forEach(b => b.classList.toggle('pressed', on));
+}
+
+document.querySelectorAll('[data-drive]').forEach(btn => {
+  const dir = btn.dataset.drive;
+  btn.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    try { btn.setPointerCapture(e.pointerId); } catch (_) {}
+    startDrive(dir, e.pointerType || 'pointer');
+  });
+  ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(t =>
+    btn.addEventListener(t, () => { if (active === dir) stopDrive('release'); }));
+  btn.addEventListener('contextmenu', (e) => e.preventDefault());
+});
+
+const keyMap = { arrowup: 'forward', w: 'forward', arrowdown: 'back', s: 'back', arrowleft: 'left', a: 'left', arrowright: 'right', d: 'right' };
+document.addEventListener('keydown', (e) => {
+  const k = e.key.toLowerCase();
+  if (k === ' ' || k === 'escape') { e.preventDefault(); fullStop('keyboard'); return; }
+  const dir = keyMap[k];
+  if (!dir) return;
+  e.preventDefault();
+  if (!e.repeat) startDrive(dir, 'keyboard');
+});
+document.addEventListener('keyup', (e) => {
+  const dir = keyMap[e.key.toLowerCase()];
+  if (dir && active === dir) stopDrive('release');
+});
+// Safety: stop if the window loses focus or is hidden
+window.addEventListener('blur', () => stopDrive('window_blur'));
+document.addEventListener('visibilitychange', () => { if (document.hidden) stopDrive('page_hidden'); });
+
+$('stopBtn').addEventListener('click', () => fullStop('button'));
+
+/* ---------- Speed ---------- */
+document.querySelectorAll('[data-speed]').forEach(btn => btn.addEventListener('click', () => {
+  speedKey = btn.dataset.speed;
+  document.querySelectorAll('[data-speed]').forEach(b => b.setAttribute('aria-pressed', String(b === btn)));
+  log('speed', speedKey);
+  updateUI();
+}));
+
+/* ---------- Head ---------- */
+let neckPos = CONFIG.neck.ahead;
+function lookAt(pos, label, pressedBtn) {
+  neckPos = Math.max(CONFIG.neckMin, Math.min(CONFIG.neckMax, Math.round(pos)));
+  robot.look(neckPos);
+  sim.tiltTarget = neckPos;
+  document.querySelectorAll('[data-look]').forEach(b => b.setAttribute('aria-pressed', String(b === pressedBtn)));
+  log('look', label + ' | ' + neckPos);
+}
+document.querySelectorAll('[data-look]').forEach(btn => btn.addEventListener('click', () =>
+  lookAt(CONFIG.neck[btn.dataset.look], btn.dataset.look, btn)));
+$('tiltUp').addEventListener('click', () => lookAt(neckPos + CONFIG.neckStep, 'tilt_up', null));
+$('tiltDown').addEventListener('click', () => lookAt(neckPos - CONFIG.neckStep, 'tilt_down', null));
+$('restHead').addEventListener('click', () => {
+  robot.restHead(); sim.tiltTarget = CONFIG.neck.down;
+  document.querySelectorAll('[data-look]').forEach(b => b.setAttribute('aria-pressed', 'false'));
+  log('rest_head');
+});
+
+/* ---------- Volume ---------- */
+let volume = 6;
+function renderVolume() { $('volValue').textContent = 'Level ' + volume + ' of 11'; }
+window.getBotVolumeCb = (v) => { if (typeof v === 'number') { volume = v; renderVolume(); } };
+safe(() => Ohmni.getBotVolume(), 'read the volume');
+function changeVolume(delta) {
+  volume = Math.max(0, Math.min(11, volume + delta));
+  robot.setVolume(volume); renderVolume(); log('volume', String(volume));
+}
+$('volDown').addEventListener('click', () => changeVolume(-1));
+$('volUp').addEventListener('click', () => changeVolume(1));
+renderVolume();
+
+/* ---------- Help, guide ---------- */
+$('helpBtn').addEventListener('click', () => {
+  const hidden = $('main').classList.toggle('no-help');
+  $('helpBtn').textContent = hidden ? 'Show help' : 'Hide help';
+  $('helpBtn').setAttribute('aria-expanded', String(!hidden));
+  log('help', hidden ? 'hidden' : 'shown');
+});
+let showGuide = true;
+$('guideBtn').addEventListener('click', () => {
+  showGuide = !showGuide;
+  $('guideBtn').textContent = showGuide ? 'Path guide on' : 'Path guide off';
+  $('guideBtn').setAttribute('aria-pressed', String(showGuide));
+  log('path_guide', showGuide ? 'on' : 'off');
+  if (!demo && lastFrameOk) drawFrame();
+});
+
+/* ---------- Hint + badges ---------- */
+function updateUI() {
+  const speedWord = speedKey === 'slow' ? 'slow speed' : 'normal speed';
+  $('hint').innerHTML = active
+    ? dirWords[active] + ', ' + speedWord + '. <small>Let go to stop.</small>'
+    : 'Hold an arrow to drive. <small>Let go to stop.</small>';
+  $('frame').classList.toggle('is-moving', !!active);
+  $('movingBadge').textContent = active ? dirWords[active] : '';
+  const rot = active === 'left' ? -25 : active === 'right' ? 25 : 0;
+  $('robotGlyph').style.transform = 'rotate(' + rot + 'deg)';
+}
+
+/* ---------- Your camera (self view) ---------- */
+let selfStream = null;
+$('selfBtn').addEventListener('click', async () => {
+  try {
+    selfStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+    $('selfVideo').srcObject = selfStream;
+    $('selfFrame').classList.add('on');
+    log('self_camera', 'on');
+  } catch (e) {
+    toast('Camera is blocked. Allow camera access in your browser, then try again.');
+  }
+});
+$('selfOffBtn').addEventListener('click', () => {
+  if (selfStream) selfStream.getTracks().forEach(t => t.stop());
+  selfStream = null; $('selfFrame').classList.remove('on');
+  log('self_camera', 'off');
+});
+
+/* ---------- Main canvas ---------- */
+const canvas = $('mainCanvas');
+const ctx = canvas.getContext('2d');
+let W = 0, H = 0;
+const lcanvas = $('lowerCanvas');
+const lctx = lcanvas.getContext('2d');
+let LW = 0, LH = 0;
+function sizeCanvas(c, g) {
+  const r = c.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  c.width = Math.round(r.width * dpr); c.height = Math.round(r.height * dpr);
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return [r.width, r.height];
+}
+function resize() {
+  [W, H] = sizeCanvas(canvas, ctx);
+  [LW, LH] = sizeCanvas(lcanvas, lctx);
+  if (!demo && lastFrameOk) drawFrame();
+}
+const ro = new ResizeObserver(resize);
+ro.observe($('frame')); ro.observe($('lowerFrame'));
+
+/* ---------- Floor camera area (cut out of the front camera picture) ---------- */
+const LOWER_KEY = 'easydrive.lowerArea';
+let lowerArea = CONFIG.lowerArea;
+try { const v = localStorage.getItem(LOWER_KEY); if (v) lowerArea = JSON.parse(v); } catch (_) {}
+let marking = false, dragStart = null, dragRect = null, imgRect = null, hideVideo = false;
+
+function updateLowerNotice() {
+  const n = $('lowerNotice');
+  if (demo) { n.classList.remove('show'); return; }
+  if (marking) {
+    $('lowerNoticeText').textContent = 'Drag a box around the small floor picture in the front camera. Press Cancel to stop.';
+    $('markBtn').textContent = 'Cancel'; n.classList.add('show');
+  } else if (!lowerArea) {
+    $('lowerNoticeText').textContent = 'Show the floor camera here: press the button, then drag a box around the small floor picture in the front camera.';
+    $('markBtn').textContent = 'Mark floor camera'; n.classList.add('show');
+  } else n.classList.remove('show');
+}
+function setMarking(on) {
+  marking = on; dragStart = dragRect = null;
+  $('frame').classList.toggle('marking', on);
+  updateLowerNotice();
+  if (lastFrameOk) drawFrame();
+}
+$('markBtn').addEventListener('click', () => setMarking(!marking));
+$('clearLower').addEventListener('click', () => {
+  lowerArea = null; try { localStorage.removeItem(LOWER_KEY); } catch (_) {}
+  dbg('floor camera area cleared'); updateLowerNotice(); if (lastFrameOk) drawFrame();
+});
+function canvasPoint(e) { const r = canvas.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
+canvas.addEventListener('pointerdown', (e) => {
+  if (!marking) return;
+  e.preventDefault(); canvas.setPointerCapture(e.pointerId);
+  dragStart = canvasPoint(e); dragRect = null;
+});
+canvas.addEventListener('pointermove', (e) => {
+  if (!marking || !dragStart) return;
+  const p = canvasPoint(e);
+  dragRect = { x: Math.min(p.x, dragStart.x), y: Math.min(p.y, dragStart.y), w: Math.abs(p.x - dragStart.x), h: Math.abs(p.y - dragStart.y) };
+  drawFrame();
+});
+canvas.addEventListener('pointerup', () => {
+  if (!marking || !dragRect || !imgRect) { dragStart = null; return; }
+  const clamp = (v) => Math.max(0, Math.min(1, v));
+  const a = {
+    x: clamp((dragRect.x - imgRect.x) / imgRect.w), y: clamp((dragRect.y - imgRect.y) / imgRect.h),
+    w: dragRect.w / imgRect.w, h: dragRect.h / imgRect.h
+  };
+  a.w = Math.min(a.w, 1 - a.x); a.h = Math.min(a.h, 1 - a.y);
+  if (a.w < 0.03 || a.h < 0.03) { toast('That box is too small. Drag a larger box around the floor picture.'); dragStart = null; return; }
+  lowerArea = { x: +a.x.toFixed(4), y: +a.y.toFixed(4), w: +a.w.toFixed(4), h: +a.h.toFixed(4) };
+  try { localStorage.setItem(LOWER_KEY, JSON.stringify(lowerArea)); } catch (_) {}
+  dbg('floor camera area: ' + JSON.stringify(lowerArea));
+  log('floor_area_set', JSON.stringify(lowerArea));
+  setMarking(false);
+});
+
+function drawGuide() {
+  if (!showGuide) return;
+  // Approximate path in front of the robot. Calibrate these numbers against your robot's camera.
+  const yTop = H * 0.62, yBot = H;
+  const bl = W * 0.30, br = W * 0.70, tl = W * 0.43, tr = W * 0.57;
+  ctx.save();
+  ctx.lineWidth = 4; ctx.strokeStyle = '#F2C230'; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(bl, yBot); ctx.lineTo(tl, yTop); ctx.moveTo(br, yBot); ctx.lineTo(tr, yTop); ctx.stroke();
+  ctx.lineWidth = 3; ctx.globalAlpha = 0.8;
+  [0.35, 0.7].forEach(p => {
+    const y = yBot - (yBot - yTop) * p;
+    const xl = bl + (tl - bl) * p, xr = br + (tr - br) * p;
+    ctx.beginPath(); ctx.moveTo(xl, y); ctx.lineTo(xl + 18, y); ctx.moveTo(xr, y); ctx.lineTo(xr - 18, y); ctx.stroke();
+  });
+  ctx.restore();
+}
+
+/* ---------- Robot video (in a real call) ---------- */
+const frameImg = new Image();
+let awaiting = false, askedAt = 0, lastFrameAt = 0, lastFrameOk = false;
+const startedAt = performance.now();
+
+function drawFrame() {
+  ctx.fillStyle = '#1B2B36'; ctx.fillRect(0, 0, W, H);
+  lctx.fillStyle = '#1B2B36'; lctx.fillRect(0, 0, LW, LH);
+  const iw = frameImg.naturalWidth, ih = frameImg.naturalHeight;
+  if (!iw || !ih || hideVideo) return;
+  // Front camera: fit whole image, no cropping
+  const s = Math.min(W / iw, H / ih), dw = iw * s, dh = ih * s, dx = (W - dw) / 2, dy = (H - dh) / 2;
+  imgRect = { x: dx, y: dy, w: dw, h: dh };
+  ctx.drawImage(frameImg, dx, dy, dw, dh);
+
+  if (lowerArea && !marking) {
+    // Floor camera: cut its area out of the picture and draw it large in its own panel
+    const sx = lowerArea.x * iw, sy = lowerArea.y * ih, sw = lowerArea.w * iw, sh = lowerArea.h * ih;
+    const ls = Math.min(LW / sw, LH / sh), lw = sw * ls, lh = sh * ls;
+    lctx.imageSmoothingQuality = 'high';
+    lctx.drawImage(frameImg, sx, sy, sw, sh, (LW - lw) / 2, (LH - lh) / 2, lw, lh);
+    if (CONFIG.hideLowerInFront) {
+      ctx.fillStyle = '#1B2B36';
+      ctx.fillRect(dx + lowerArea.x * dw - 1, dy + lowerArea.y * dh - 1, lowerArea.w * dw + 2, lowerArea.h * dh + 2);
+    }
+  }
+  if (marking && dragRect) {
+    ctx.save(); ctx.setLineDash([8, 6]); ctx.lineWidth = 3; ctx.strokeStyle = '#F2C230';
+    ctx.strokeRect(dragRect.x, dragRect.y, dragRect.w, dragRect.h); ctx.restore();
+  }
+  if (!marking) drawGuide();
+}
+frameImg.onload = () => { lastFrameAt = performance.now(); lastFrameOk = true; drawFrame(); };
+
+// Called by Ohmni after Ohmni.captureVideo()
+window.captureVideoCb = function (data) {
+  awaiting = false;
+  if (!data) return;
+  const str = String(data);
+  frameImg.src = str.startsWith('data:') ? str : 'data:image/jpeg;base64,' + str;
+};
+
+if (!demo) {
+  setInterval(() => {
+    if (awaiting && performance.now() - askedAt < 1000) return;   // don't pile up requests
+    awaiting = true; askedAt = performance.now();
+    try { Ohmni.captureVideo(CONFIG.captureWidth, CONFIG.captureHeight); } catch (e) { awaiting = false; }
+  }, CONFIG.frameMs);
+
+  setInterval(() => {
+    const since = performance.now() - (lastFrameAt || startedAt);
+    const n = $('notice');
+    if (since > CONFIG.noVideoWarnMs) {
+      n.textContent = lastFrameAt
+        ? 'Video paused. Check the connection to the robot.'
+        : 'No video yet. Start a call with the robot. If this message stays, the overlay may not have access to the call video.';
+      n.classList.add('show');
+    } else n.classList.remove('show');
+  }, 1000);
+}
+
+/* ---------- Demo scene (no robot) ---------- */
+function wrapAngle(a) { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; }
+let lastT = performance.now();
+function demoLoop(now) {
+  const dt = Math.min(0.05, (now - lastT) / 1000); lastT = now;
+  if (sim.cmd && now < sim.cmd.until) {
+    const s = CONFIG.speeds[sim.cmd.speed];
+    if (sim.cmd.dir === 'forward') sim.z += (s.drive / 600) * 1.6 * dt;
+    if (sim.cmd.dir === 'back') sim.z -= (s.drive / 600) * 1.6 * dt;
+    if (sim.cmd.dir === 'left') sim.heading -= (s.turn / 300) * 0.9 * dt;
+    if (sim.cmd.dir === 'right') sim.heading += (s.turn / 300) * 0.9 * dt;
+  }
+  sim.tilt += (sim.tiltTarget - sim.tilt) * Math.min(1, dt * 4);
+  drawDemo();
+  drawDemoLower();
+  requestAnimationFrame(demoLoop);
+}
+function drawDemo() {
+  if (!W || !H) return;
+  const horizon = H * 0.42 + (sim.tilt - 512) * (H / 300);
+  // wall
+  ctx.fillStyle = '#DCE4E6'; ctx.fillRect(0, 0, W, H);
+  // doors along the wall, placed around the robot
+  const fov = 1.4;
+  ['Room 12', 'Lounge', 'Room 14', 'Nurse station', 'Room 16', 'Exit'].forEach((label, i) => {
+    const ang = wrapAngle(i * (Math.PI / 3) - sim.heading);
+    if (Math.abs(ang) > fov) return;
+    const x = W / 2 + (ang / fov) * W * 0.6, dw = Math.max(90, W * 0.12), dh = H * 0.3;
+    ctx.fillStyle = '#8FA7B4'; ctx.fillRect(x - dw / 2, horizon - dh, dw, dh);
+    ctx.fillStyle = '#FFFFFF'; ctx.font = '700 ' + Math.max(11, W * 0.016) + 'px "Atkinson Hyperlegible", sans-serif';
+    ctx.textAlign = 'center'; ctx.fillText(label, x, horizon - dh + Math.max(18, W * 0.022));
+  });
+  // floor
+  if (horizon < H) {
+    ctx.fillStyle = '#B9C7C9'; ctx.fillRect(0, Math.max(0, horizon), W, H - horizon);
+    ctx.strokeStyle = 'rgba(19,51,74,.28)'; ctx.lineWidth = 1.5;
+    // lines that recede (shift sideways when turning)
+    const spacing = W * 0.14, shift = ((-sim.heading * W * 0.6) % spacing + spacing) % spacing;
+    for (let k = -14; k <= 14; k++) {
+      ctx.beginPath(); ctx.moveTo(W / 2, horizon); ctx.lineTo(W / 2 + k * spacing + shift, H + H); ctx.stroke();
+    }
+    // cross lines (scroll when driving)
+    const frac = ((sim.z % 1) + 1) % 1, K = H * 0.55;
+    for (let i = 1; i < 40; i++) {
+      const d = i - frac; if (d < 0.25) continue;
+      const y = horizon + K / d; if (y > H) continue;
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+    }
+  }
+  drawGuide();
+}
+function drawDemoLower() {
+  if (!LW || !LH) return;
+  lctx.fillStyle = '#B9C7C9'; lctx.fillRect(0, 0, LW, LH);
+  lctx.save();
+  lctx.translate(LW / 2, LH * 0.9); lctx.rotate(sim.heading);
+  const g = 44, off = ((sim.z * g * 2) % g + g) % g;
+  lctx.strokeStyle = 'rgba(19,51,74,.3)'; lctx.lineWidth = 1.5;
+  for (let i = -20; i <= 20; i++) {
+    lctx.beginPath(); lctx.moveTo(i * g, -LH * 2); lctx.lineTo(i * g, LH * 2); lctx.stroke();
+    lctx.beginPath(); lctx.moveTo(-LW * 2, i * g + off); lctx.lineTo(LW * 2, i * g + off); lctx.stroke();
+  }
+  lctx.restore();
+  // robot base edge at the bottom of the floor view
+  lctx.fillStyle = '#13334A'; lctx.fillRect(LW * 0.25, LH - 14, LW * 0.5, 14);
+}
+if (demo) requestAnimationFrame(demoLoop);
+
+/* ---------- Debug head tests ---------- */
+if (debugOn) {
+  const val = () => Number($('htPos').value);
+  $('htPos').addEventListener('input', () => { $('htVal').textContent = val(); });
+  $('htA').addEventListener('click', () => {
+    dbg('TEST A basic tilt to ' + val());
+    try { Ohmni.setNeckTorqueEnabled(1); setTimeout(() => { try { Ohmni.setNeckPosition(val(), CONFIG.neckInterval); } catch (e) { dbg('A failed: ' + e.message); } }, 200); }
+    catch (e) { dbg('A failed: ' + e.message); }
+  });
+  $('htB').addEventListener('click', () => { dbg('TEST B pos command to ' + val()); botshell('pos', [CONFIG.neckServoId, val(), CONFIG.neckMoveMs]); });
+  $('htC').addEventListener('click', () => { dbg('TEST C wake head'); botshell('wake_head', []); });
+  $('htD').addEventListener('click', () => { dbg('TEST D rest head'); botshell('rest_head', []); });
+  $('htHide').addEventListener('click', () => {
+    hideVideo = !hideVideo;
+    $('htHide').textContent = hideVideo ? 'Show robot video' : 'Hide robot video';
+    dbg(hideVideo ? 'robot video hidden' : 'robot video shown');
+    if (lastFrameOk) drawFrame();
+  });
+}
+
+updateLowerNotice();
 updateUI();
 log('session_start', demo ? 'demo' : 'robot');
 </script>
