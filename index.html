@@ -1329,7 +1329,7 @@ log('session_start', demo ? 'demo' : 'robot');
 </html>
 -->
 
-
+<!--
 <!doctype html>
 <html lang="en">
 <head>
@@ -1339,7 +1339,7 @@ log('session_start', demo ? 'demo' : 'robot');
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap" rel="stylesheet">
-<!-- Ohmni in-call API. Outside a call (or offline) the page falls back to demo mode. -->
+<-- Ohmni in-call API. Outside a call (or offline) the page falls back to demo mode. 
 <script src="https://api.ohmnilabs.com/ohmni-api/Ohmni-incall.js" onerror="window.__ohmniLoadFailed = true"></script>
 <style>
   :root {
@@ -2179,6 +2179,540 @@ if (debugOn) {
 
 updateLowerNotice();
 updateUI();
+log('session_start', demo ? 'demo' : 'robot');
+</script>
+</body>
+</html>-->
+
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Robot control</title>
+<!-- Ohmni in-call API. Outside a call the page runs in demo mode. -->
+<script src="https://api.ohmnilabs.com/ohmni-api/Ohmni-incall.js" onerror="window.__ohmniLoadFailed = true"></script>
+<style>
+  :root {
+    --ink: #111111;
+    --mid: #6b6b6b;
+    --line: #111111;
+    --fill: #f2f2f2;
+    --bg: #ffffff;
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: var(--ink);
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    position: fixed; inset: 0; z-index: 2147483000;  /* cover Ohmni's default call screen */
+    background: var(--bg); overflow: auto;
+  }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  button:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+
+  .app {
+    width: min(100% - 32px, 980px, (100vh - 300px) * 1.55);
+    min-width: 300px;
+    margin: 16px auto;
+  }
+
+  /* ----- Cameras: front view large, down view overlapping its bottom edge ----- */
+  .views { position: relative; padding-bottom: 11%; }
+  .view {
+    position: relative; border: 1.5px solid var(--line); border-radius: 10px;
+    background: var(--fill); overflow: hidden;
+  }
+  .view canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .front { aspect-ratio: 16 / 9; }
+  .down {
+    position: absolute; bottom: 0; left: 55%; transform: translateX(-50%);
+    width: 32%; aspect-ratio: 4 / 3; background: var(--fill);
+  }
+  .label {
+    position: absolute; top: 8px; left: 10px; font-size: 13px; color: var(--mid);
+    background: rgba(255,255,255,.85); padding: 1px 6px; border-radius: 4px; pointer-events: none;
+  }
+  .notice {
+    position: absolute; left: 10px; right: 10px; bottom: 10px; display: none;
+    font-size: 13px; color: var(--ink); background: rgba(255,255,255,.92);
+    border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px;
+  }
+  .notice.show { display: block; }
+  .notice button { margin-top: 6px; display: block; }
+  .front.marking canvas { cursor: crosshair; touch-action: none; }
+  .front.marking { outline: 3px dashed var(--ink); outline-offset: -6px; }
+
+  /* ----- Controls ----- */
+  .controls {
+    display: flex; justify-content: center; align-items: center; gap: clamp(32px, 12vw, 140px);
+    margin-top: 20px;
+  }
+  .btn {
+    background: var(--bg); border: 1.5px solid var(--line); border-radius: 8px;
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    user-select: none; -webkit-user-select: none; touch-action: none;
+  }
+  .btn:hover { background: var(--fill); }
+  .btn.pressed { background: var(--ink); color: var(--bg); }
+  .btn svg { width: 26px; height: 26px; }
+
+  .tilt { display: grid; gap: 14px; }
+  .tilt .btn { width: 120px; height: 56px; font-size: 15px; white-space: nowrap; }
+  .tilt .btn svg { width: 18px; height: 18px; }
+
+  .pad { display: grid; grid-template-columns: repeat(3, 64px); grid-template-rows: repeat(3, 64px); gap: 8px; }
+  .pad .up { grid-area: 1 / 2; }
+  .pad .left { grid-area: 2 / 1; }
+  .pad .stop { grid-area: 2 / 2; font-size: 15px; font-weight: 600; }
+  .pad .right { grid-area: 2 / 3; }
+  .pad .down-btn { grid-area: 3 / 2; }
+
+  .mode { text-align: center; font-size: 12px; color: var(--mid); margin-top: 14px; min-height: 1em; }
+
+  .toast {
+    position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); display: none;
+    background: var(--bg); border: 1.5px solid var(--line); border-radius: 8px; padding: 8px 14px; font-size: 14px;
+  }
+  .toast.show { display: block; }
+
+  /* Debug panel (only with ?debug=1) */
+  .debug {
+    position: fixed; right: 10px; top: 10px; width: min(330px, 92vw); max-height: 60vh; overflow: auto;
+    background: var(--bg); border: 1.5px solid var(--line); border-radius: 8px; padding: 10px; font-size: 13px;
+  }
+  .debug .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0; }
+  .debug button { border: 1px solid var(--line); background: var(--bg); border-radius: 6px; padding: 3px 8px; font-size: 12px; }
+  .debug input[type=range] { flex: 1; }
+  .debug pre { margin: 6px 0 0; white-space: pre-wrap; font-size: 11px; }
+
+  @media (max-width: 560px) {
+    .controls { gap: 24px; }
+    .tilt .btn { width: 96px; }
+    .pad { grid-template-columns: repeat(3, 56px); grid-template-rows: repeat(3, 56px); }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="views">
+    <div class="view front" id="frontView">
+      <canvas id="frontCanvas"></canvas>
+      <span class="label">Front view camera</span>
+      <div class="notice" id="frontNotice" role="status"></div>
+    </div>
+    <div class="view down" id="downView">
+      <canvas id="downCanvas"></canvas>
+      <span class="label">Down view camera</span>
+      <div class="notice" id="downNotice" role="status">
+        <span id="downNoticeText">Not set up yet.</span>
+        <button class="btn" id="markBtn" data-external="true" style="padding:4px 10px;font-size:13px">Set up</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <div class="tilt" role="group" aria-label="Tilt camera">
+      <button class="btn" id="tiltUp" data-external="true">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5l7 9H5z" fill="currentColor"/></svg>Tilt up</button>
+      <button class="btn" id="tiltDown" data-external="true">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19l7-9H5z" fill="currentColor"/></svg>Tilt down</button>
+    </div>
+
+    <div class="pad" role="group" aria-label="Drive">
+      <button class="btn up" data-drive="forward" data-external="true" aria-label="Forward">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4l7 8h-4.5v8h-5v-8H5z" fill="currentColor"/></svg></button>
+      <button class="btn left" data-drive="left" data-external="true" aria-label="Turn left">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12l8-7v4.5h8v5h-8V19z" fill="currentColor"/></svg></button>
+      <button class="btn stop" id="stopBtn" data-external="true">Stop</button>
+      <button class="btn right" data-drive="right" data-external="true" aria-label="Turn right">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12l-8 7v-4.5H4v-5h8V5z" fill="currentColor"/></svg></button>
+      <button class="btn down-btn" data-drive="back" data-external="true" aria-label="Back">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20l-7-8h4.5V4h5v8H19z" fill="currentColor"/></svg></button>
+    </div>
+  </div>
+
+  <div class="mode" id="mode"></div>
+</div>
+
+<div class="toast" id="toast" role="alert"></div>
+
+<div class="debug" id="debug" hidden>
+  <b>Debug</b>
+  <div class="row">
+    <label for="htPos">Head</label>
+    <input type="range" id="htPos" min="300" max="650" step="10" value="450" data-external="true">
+    <output id="htVal">450</output>
+  </div>
+  <div class="row">
+    <button id="htA" data-external="true">A: Basic tilt</button>
+    <button id="htB" data-external="true">B: pos command</button>
+    <button id="htC" data-external="true">C: Wake head</button>
+    <button id="htD" data-external="true">D: Rest head</button>
+  </div>
+  <div class="row">
+    <button id="clearDown" data-external="true">Clear down view area</button>
+    <button id="logBtn" data-external="true">Download log</button>
+  </div>
+  <pre id="debugText"></pre>
+</div>
+
+<script>
+/* ============================================================
+   SETTINGS: adjust after testing on your robot
+   ============================================================ */
+const CONFIG = {
+  driveSpeed: 300,       // forward/back wheel speed
+  turnSpeed: 160,        // turning wheel speed
+  forwardSign: 1,        // set to -1 if Forward drives backwards
+  turnSign: 1,           // set to -1 if left/right are swapped
+  repeatMs: 250,         // a held button re-sends its command this often
+  moveMs: 600,           // each command lasts this long (robot stops if connection drops)
+  frameMs: 66,           // video refresh (~15 fps)
+  captureWidth: 1280,
+  captureHeight: 720,
+  downArea: null,        // down camera area as fractions, e.g. { x: 0.75, y: 0.7, w: 0.23, h: 0.28 }
+  neckStart: 512,        // 300 = down, 512 = straight, 650 = up
+  neckStep: 40,          // how far one tilt press moves
+  neckMin: 300, neckMax: 650,
+  neckRepeatMs: 350,     // holding a tilt button repeats this often
+  neckInterval: 150,
+  neckMethod: 'basic',   // 'basic' = setNeckPosition, 'pos' = NativeJS pos command, 'both'
+  neckServoId: 3,
+  neckMoveMs: 800,
+  noVideoWarnMs: 5000
+};
+
+/* ---------- Setup ---------- */
+const $ = (id) => document.getElementById(id);
+const params = new URLSearchParams(location.search);
+const hasOhmni = !!(window.Ohmni && typeof window.Ohmni.move === 'function');
+const demo = params.has('demo') || !hasOhmni;
+const debugOn = params.has('debug');
+$('mode').textContent = demo ? 'Demo mode (no robot connected)' : '';
+
+function dbg(msg) {
+  console.log('[Drive]', msg);
+  if (debugOn) $('debugText').textContent = new Date().toLocaleTimeString() + '  ' + msg + '\n' + $('debugText').textContent;
+}
+let toastTimer;
+function toast(msg) {
+  $('toast').textContent = msg; $('toast').classList.add('show');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => $('toast').classList.remove('show'), 4000);
+}
+
+/* ---------- Logging (Ctrl+Shift+L downloads the log) ---------- */
+const t0 = Date.now(), events = [];
+function log(action, detail = '') {
+  events.push([new Date().toISOString(), ((Date.now() - t0) / 1000).toFixed(2), demo ? 'demo' : 'robot', action, detail]);
+}
+function downloadLog() {
+  const csv = 'timestamp,seconds,mode,action,detail\n' +
+    events.map(r => r.map(c => '"' + String(c).replace(/"/g, '""') + '"').join(',')).join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+  a.download = 'drive-log-' + new Date().toISOString().replace(/[:.]/g, '-') + '.csv';
+  document.body.appendChild(a); a.click(); a.remove();
+}
+
+/* ---------- Robot commands ---------- */
+function call(fn, what) {
+  if (demo) return true;
+  try { fn(); return true; } catch (e) { dbg(what + ' failed: ' + e.message); toast('Could not ' + what + '.'); return false; }
+}
+function botshell(name, args) {
+  if (demo || typeof Ohmni.sendBotshellCmd !== 'function') { dbg('sendBotshellCmd not available'); return false; }
+  try { Ohmni.sendBotshellCmd({ commandName: name, parameterArray: args }); dbg('sent ' + name + ' ' + args.join(' ')); return true; }
+  catch (e) { dbg(name + ' failed: ' + e.message); return false; }
+}
+function moveWheels(l, r, ms) { call(() => Ohmni.move(l, r, ms), 'move the robot'); }
+function setNeck(pos) {
+  if (demo) return;
+  const m = CONFIG.neckMethod;
+  if (m === 'basic' || m === 'both') {
+    call(() => Ohmni.setNeckTorqueEnabled(1), 'tilt the camera');
+    setTimeout(() => { call(() => Ohmni.setNeckPosition(pos, CONFIG.neckInterval), 'tilt the camera'); dbg('setNeckPosition(' + pos + ')'); }, 200);
+  }
+  if (m === 'pos' || m === 'both') botshell('pos', [CONFIG.neckServoId, pos, CONFIG.neckMoveMs]);
+}
+
+/* ---------- Driving (hold to drive) ---------- */
+const sim = { z: 0, heading: 0, tilt: CONFIG.neckStart, tiltTarget: CONFIG.neckStart, cmd: null };
+let active = null, repeatTimer = null;
+
+function wheelsFor(dir) {
+  const d = CONFIG.driveSpeed * CONFIG.forwardSign, t = CONFIG.turnSpeed * CONFIG.turnSign;
+  return { forward: [d, -d], back: [-d, d], left: [-t, -t], right: [t, t] }[dir] || [0, 0];
+}
+function sendOnce() {
+  if (!active) return;
+  const [l, r] = wheelsFor(active);
+  moveWheels(l, r, CONFIG.moveMs);
+  sim.cmd = { dir: active, until: performance.now() + CONFIG.moveMs };
+}
+function setPressed(dir, on) {
+  document.querySelectorAll('[data-drive="' + dir + '"]').forEach(b => b.classList.toggle('pressed', on));
+}
+function startDrive(dir, source) {
+  if (active === dir) return;
+  if (active) stopDrive('switch');
+  active = dir; sendOnce();
+  repeatTimer = setInterval(sendOnce, CONFIG.repeatMs);
+  setPressed(dir, true);
+  log('drive_start', dir + ' | ' + source);
+}
+function stopDrive(reason = 'release') {
+  if (!active) return;
+  clearInterval(repeatTimer); repeatTimer = null;
+  setPressed(active, false);
+  const d = active; active = null;
+  moveWheels(0, 0, 100); sim.cmd = null;
+  log('drive_stop', d + ' | ' + reason);
+}
+function fullStop(source) {
+  if (active) stopDrive('stop_' + source); else { moveWheels(0, 0, 100); sim.cmd = null; }
+  log('stop', source);
+}
+
+document.querySelectorAll('[data-drive]').forEach(btn => {
+  const dir = btn.dataset.drive;
+  btn.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    try { btn.setPointerCapture(e.pointerId); } catch (_) {}
+    startDrive(dir, e.pointerType || 'pointer');
+  });
+  ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(t =>
+    btn.addEventListener(t, () => { if (active === dir) stopDrive('release'); }));
+  btn.addEventListener('contextmenu', (e) => e.preventDefault());
+});
+$('stopBtn').addEventListener('click', () => fullStop('button'));
+
+/* ---------- Tilt (press = one step, hold = keep tilting) ---------- */
+let neckPos = CONFIG.neckStart, tiltTimer = null;
+function tiltStep(dir) {
+  neckPos = Math.max(CONFIG.neckMin, Math.min(CONFIG.neckMax, neckPos + dir * CONFIG.neckStep));
+  setNeck(neckPos); sim.tiltTarget = neckPos;
+  log(dir > 0 ? 'tilt_up' : 'tilt_down', String(neckPos));
+}
+[['tiltUp', 1], ['tiltDown', -1]].forEach(([id, dir]) => {
+  const b = $(id);
+  const end = () => { clearInterval(tiltTimer); tiltTimer = null; b.classList.remove('pressed'); };
+  b.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    try { b.setPointerCapture(e.pointerId); } catch (_) {}
+    b.classList.add('pressed'); tiltStep(dir);
+    clearInterval(tiltTimer); tiltTimer = setInterval(() => tiltStep(dir), CONFIG.neckRepeatMs);
+  });
+  ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(t => b.addEventListener(t, end));
+  b.addEventListener('contextmenu', (e) => e.preventDefault());
+});
+
+/* ---------- Keyboard: arrows/WASD drive, Space/Esc stop ---------- */
+const keyMap = { arrowup: 'forward', w: 'forward', arrowdown: 'back', s: 'back', arrowleft: 'left', a: 'left', arrowright: 'right', d: 'right' };
+document.addEventListener('keydown', (e) => {
+  if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'l') { e.preventDefault(); downloadLog(); return; }
+  const k = e.key.toLowerCase();
+  if (k === ' ' || k === 'escape') { e.preventDefault(); fullStop('keyboard'); return; }
+  const dir = keyMap[k]; if (!dir) return;
+  e.preventDefault(); if (!e.repeat) startDrive(dir, 'keyboard');
+});
+document.addEventListener('keyup', (e) => {
+  const dir = keyMap[e.key.toLowerCase()];
+  if (dir && active === dir) stopDrive('release');
+});
+window.addEventListener('blur', () => stopDrive('window_blur'));
+document.addEventListener('visibilitychange', () => { if (document.hidden) stopDrive('page_hidden'); });
+
+/* ---------- Canvases ---------- */
+const fc = $('frontCanvas'), fctx = fc.getContext('2d');
+const dc = $('downCanvas'), dctx = dc.getContext('2d');
+let FW = 0, FH = 0, DW = 0, DH = 0;
+function sizeCanvas(c, g) {
+  const r = c.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  c.width = Math.round(r.width * dpr); c.height = Math.round(r.height * dpr);
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return [r.width, r.height];
+}
+function resize() {
+  [FW, FH] = sizeCanvas(fc, fctx); [DW, DH] = sizeCanvas(dc, dctx);
+  if (!demo && lastFrameOk) drawFrame();
+}
+const ro = new ResizeObserver(resize);
+ro.observe($('frontView')); ro.observe($('downView'));
+
+/* ---------- Down camera area (cut out of the video picture) ---------- */
+const AREA_KEY = 'simpledrive.downArea';
+let downArea = CONFIG.downArea;
+try { const v = localStorage.getItem(AREA_KEY); if (v) downArea = JSON.parse(v); } catch (_) {}
+let marking = false, dragStart = null, dragRect = null, imgRect = null;
+
+function updateDownNotice() {
+  const n = $('downNotice');
+  if (demo) { n.classList.remove('show'); return; }
+  if (marking) {
+    $('downNoticeText').textContent = 'Drag a box around the small down-camera picture in the front view.';
+    $('markBtn').textContent = 'Cancel'; n.classList.add('show');
+  } else if (!downArea) {
+    $('downNoticeText').textContent = 'Not set up yet.';
+    $('markBtn').textContent = 'Set up'; n.classList.add('show');
+  } else n.classList.remove('show');
+}
+function setMarking(on) {
+  marking = on; dragStart = dragRect = null;
+  $('frontView').classList.toggle('marking', on);
+  updateDownNotice(); if (lastFrameOk) drawFrame();
+}
+$('markBtn').addEventListener('click', () => setMarking(!marking));
+$('clearDown').addEventListener('click', () => {
+  downArea = null; try { localStorage.removeItem(AREA_KEY); } catch (_) {}
+  dbg('down view area cleared'); updateDownNotice(); if (lastFrameOk) drawFrame();
+});
+function pt(e) { const r = fc.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
+fc.addEventListener('pointerdown', (e) => {
+  if (!marking) return;
+  e.preventDefault(); fc.setPointerCapture(e.pointerId); dragStart = pt(e); dragRect = null;
+});
+fc.addEventListener('pointermove', (e) => {
+  if (!marking || !dragStart) return;
+  const p = pt(e);
+  dragRect = { x: Math.min(p.x, dragStart.x), y: Math.min(p.y, dragStart.y), w: Math.abs(p.x - dragStart.x), h: Math.abs(p.y - dragStart.y) };
+  drawFrame();
+});
+fc.addEventListener('pointerup', () => {
+  if (!marking || !dragRect || !imgRect) { dragStart = null; return; }
+  const c = (v) => Math.max(0, Math.min(1, v));
+  const a = { x: c((dragRect.x - imgRect.x) / imgRect.w), y: c((dragRect.y - imgRect.y) / imgRect.h), w: dragRect.w / imgRect.w, h: dragRect.h / imgRect.h };
+  a.w = Math.min(a.w, 1 - a.x); a.h = Math.min(a.h, 1 - a.y);
+  if (a.w < 0.03 || a.h < 0.03) { toast('Box too small. Drag a larger box.'); dragStart = null; return; }
+  downArea = { x: +a.x.toFixed(4), y: +a.y.toFixed(4), w: +a.w.toFixed(4), h: +a.h.toFixed(4) };
+  try { localStorage.setItem(AREA_KEY, JSON.stringify(downArea)); } catch (_) {}
+  dbg('down view area: ' + JSON.stringify(downArea)); log('down_area_set', JSON.stringify(downArea));
+  setMarking(false);
+});
+
+/* ---------- Robot video ---------- */
+const frameImg = new Image();
+let awaiting = false, askedAt = 0, lastFrameAt = 0, lastFrameOk = false;
+const startedAt = performance.now();
+const FILL = '#f2f2f2';
+
+function drawFrame() {
+  fctx.fillStyle = FILL; fctx.fillRect(0, 0, FW, FH);
+  dctx.fillStyle = FILL; dctx.fillRect(0, 0, DW, DH);
+  const iw = frameImg.naturalWidth, ih = frameImg.naturalHeight;
+  if (!iw || !ih) return;
+  const s = Math.min(FW / iw, FH / ih), w = iw * s, h = ih * s, x = (FW - w) / 2, y = (FH - h) / 2;
+  imgRect = { x, y, w, h };
+  fctx.drawImage(frameImg, x, y, w, h);
+  if (downArea && !marking) {
+    const sx = downArea.x * iw, sy = downArea.y * ih, sw = downArea.w * iw, sh = downArea.h * ih;
+    const ds = Math.min(DW / sw, DH / sh), dw = sw * ds, dh = sh * ds;
+    dctx.imageSmoothingQuality = 'high';
+    dctx.drawImage(frameImg, sx, sy, sw, sh, (DW - dw) / 2, (DH - dh) / 2, dw, dh);
+    // cover the small copy inside the front view
+    fctx.fillStyle = FILL;
+    fctx.fillRect(x + downArea.x * w - 1, y + downArea.y * h - 1, downArea.w * w + 2, downArea.h * h + 2);
+  }
+  if (marking && dragRect) {
+    fctx.save(); fctx.setLineDash([6, 5]); fctx.lineWidth = 2; fctx.strokeStyle = '#111';
+    fctx.strokeRect(dragRect.x, dragRect.y, dragRect.w, dragRect.h); fctx.restore();
+  }
+}
+frameImg.onload = () => { lastFrameAt = performance.now(); lastFrameOk = true; drawFrame(); };
+window.captureVideoCb = function (data) {
+  awaiting = false; if (!data) return;
+  const str = String(data);
+  frameImg.src = str.startsWith('data:') ? str : 'data:image/jpeg;base64,' + str;
+};
+if (!demo) {
+  setInterval(() => {
+    if (awaiting && performance.now() - askedAt < 1000) return;
+    awaiting = true; askedAt = performance.now();
+    try { Ohmni.captureVideo(CONFIG.captureWidth, CONFIG.captureHeight); } catch (e) { awaiting = false; }
+  }, CONFIG.frameMs);
+  setInterval(() => {
+    const since = performance.now() - (lastFrameAt || startedAt), n = $('frontNotice');
+    if (since > CONFIG.noVideoWarnMs) {
+      n.textContent = lastFrameAt ? 'Video paused. Check the connection.' : 'No video yet. Start a call with the robot.';
+      n.classList.add('show');
+    } else n.classList.remove('show');
+  }, 1000);
+}
+
+/* ---------- Demo scene (grayscale, no robot) ---------- */
+let lastT = performance.now();
+function demoLoop(now) {
+  const dt = Math.min(0.05, (now - lastT) / 1000); lastT = now;
+  if (sim.cmd && now < sim.cmd.until) {
+    if (sim.cmd.dir === 'forward') sim.z += 0.8 * dt;
+    if (sim.cmd.dir === 'back') sim.z -= 0.8 * dt;
+    if (sim.cmd.dir === 'left') sim.heading -= 0.5 * dt;
+    if (sim.cmd.dir === 'right') sim.heading += 0.5 * dt;
+  }
+  sim.tilt += (sim.tiltTarget - sim.tilt) * Math.min(1, dt * 4);
+  drawDemoFront(); drawDemoDown();
+  requestAnimationFrame(demoLoop);
+}
+function drawDemoFront() {
+  if (!FW) return;
+  const hz = FH * 0.45 + (sim.tilt - 512) * (FH / 300);
+  fctx.fillStyle = '#fafafa'; fctx.fillRect(0, 0, FW, FH);
+  // exhibits on the wall
+  for (let i = 0; i < 6; i++) {
+    let ang = i * Math.PI / 3 - sim.heading;
+    ang = Math.atan2(Math.sin(ang), Math.cos(ang));
+    if (Math.abs(ang) > 1.3) continue;
+    const x = FW / 2 + (ang / 1.3) * FW * 0.6, w = FW * 0.1, h = FH * 0.22;
+    fctx.strokeStyle = '#999'; fctx.lineWidth = 1.5; fctx.strokeRect(x - w / 2, hz - h - FH * 0.08, w, h);
+  }
+  if (hz < FH) {
+    fctx.fillStyle = '#e6e6e6'; fctx.fillRect(0, Math.max(0, hz), FW, FH - hz);
+    fctx.strokeStyle = 'rgba(0,0,0,.18)'; fctx.lineWidth = 1;
+    const sp = FW * 0.14, sh = ((-sim.heading * FW * 0.6) % sp + sp) % sp;
+    for (let k = -14; k <= 14; k++) { fctx.beginPath(); fctx.moveTo(FW / 2, hz); fctx.lineTo(FW / 2 + k * sp + sh, FH * 2); fctx.stroke(); }
+    const fr = ((sim.z % 1) + 1) % 1;
+    for (let i = 1; i < 40; i++) {
+      const d = i - fr; if (d < 0.25) continue;
+      const y = hz + FH * 0.5 / d; if (y > FH) continue;
+      fctx.beginPath(); fctx.moveTo(0, y); fctx.lineTo(FW, y); fctx.stroke();
+    }
+  }
+}
+function drawDemoDown() {
+  if (!DW) return;
+  dctx.fillStyle = '#e6e6e6'; dctx.fillRect(0, 0, DW, DH);
+  dctx.save(); dctx.translate(DW / 2, DH * 0.9); dctx.rotate(sim.heading);
+  const g = 30, off = ((sim.z * g * 2) % g + g) % g;
+  dctx.strokeStyle = 'rgba(0,0,0,.2)'; dctx.lineWidth = 1;
+  for (let i = -20; i <= 20; i++) {
+    dctx.beginPath(); dctx.moveTo(i * g, -DH * 2); dctx.lineTo(i * g, DH * 2); dctx.stroke();
+    dctx.beginPath(); dctx.moveTo(-DW * 2, i * g + off); dctx.lineTo(DW * 2, i * g + off); dctx.stroke();
+  }
+  dctx.restore();
+  dctx.fillStyle = '#111'; dctx.fillRect(DW * 0.3, DH - 8, DW * 0.4, 8);
+}
+if (demo) requestAnimationFrame(demoLoop);
+
+/* ---------- Debug tools (?debug=1) ---------- */
+if (debugOn) {
+  $('debug').hidden = false;
+  const O = window.Ohmni || {};
+  ['move', 'setNeckTorqueEnabled', 'setNeckPosition', 'sendBotshellCmd', 'captureVideo']
+    .forEach(f => dbg('Ohmni.' + f + ': ' + (typeof O[f] === 'function' ? 'available' : 'MISSING')));
+  const val = () => Number($('htPos').value);
+  $('htPos').addEventListener('input', () => { $('htVal').textContent = val(); });
+  $('htA').addEventListener('click', () => {
+    dbg('TEST A basic tilt to ' + val());
+    try { Ohmni.setNeckTorqueEnabled(1); setTimeout(() => { try { Ohmni.setNeckPosition(val(), CONFIG.neckInterval); } catch (e) { dbg('A failed: ' + e.message); } }, 200); }
+    catch (e) { dbg('A failed: ' + e.message); }
+  });
+  $('htB').addEventListener('click', () => { dbg('TEST B pos to ' + val()); botshell('pos', [CONFIG.neckServoId, val(), CONFIG.neckMoveMs]); });
+  $('htC').addEventListener('click', () => { dbg('TEST C wake head'); botshell('wake_head', []); });
+  $('htD').addEventListener('click', () => { dbg('TEST D rest head'); botshell('rest_head', []); });
+  $('logBtn').addEventListener('click', downloadLog);
+}
+
+updateDownNotice();
 log('session_start', demo ? 'demo' : 'robot');
 </script>
 </body>
